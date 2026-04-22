@@ -1,2 +1,4 @@
 MODEL_PATH = "models/alphabet_model.pkl"
+BUFFER_SIZE = 30
+USE_STATIC_ONLY = True
 SEQUENCE_LENGTH = 30
