@@ -18,14 +18,24 @@ def main():
         if not ret:
             break
 
-        landmarks = tracker.get_landmarks(frame)
+        frame = cv2.flip(frame, 1)
+
+        landmarks, hand_landmarks = tracker.get_landmarks(frame)
         features = extract_features(landmarks)
+
+        frame = tracker.draw_landmarks(frame, hand_landmarks)
 
         prediction = ""
 
         if features is not None:
-            buffer.add(features)  # future use
-            prediction = model.predict(features)
+            pred, conf = model.predict(features)
+
+            print(f"{pred} ({conf:.2f})")
+
+            if pred != "":
+                buffer.add(pred)
+
+            prediction = buffer.get_most_common()
 
         frame = show_prediction(frame, prediction)
         cv2.imshow("Sign Language Detection", frame)

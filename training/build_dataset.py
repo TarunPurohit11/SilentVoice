@@ -3,9 +3,6 @@ import cv2
 import numpy as np
 import mediapipe as mp
 
-# ----------------------------
-# MediaPipe setup
-# ----------------------------
 mp_hands = mp.solutions.hands
 
 hands = mp_hands.Hands(
@@ -14,9 +11,6 @@ hands = mp_hands.Hands(
     min_detection_confidence=0.5
 )
 
-# ----------------------------
-# Dataset path (FIXED)
-# ----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DATA_DIR = os.path.abspath(
@@ -24,9 +18,6 @@ DATA_DIR = os.path.abspath(
 )
 
 print("Resolved DATA_DIR:", DATA_DIR)
-print("Exists:", os.path.exists(DATA_DIR))
-
-allowed_labels = {"a", "b", "c", "d", "e"}
 
 X, y = [], []
 
@@ -34,50 +25,46 @@ detected = 0
 skipped = 0
 
 # ----------------------------
-# Check dataset folder exists
+# ANGLE FUNCTION
 # ----------------------------
-if not os.path.exists(DATA_DIR):
-    print("ERROR: Dataset folder not found:", DATA_DIR)
-    exit()
+def get_angle(a, b, c):
+    ba = a - b
+    bc = c - b
+
+    cos_angle = np.dot(ba, bc) / (
+        np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6
+    )
+
+    return np.arccos(np.clip(cos_angle, -1.0, 1.0))
+
 
 # ----------------------------
-# Loop through dataset
+# PROCESS DATASET
 # ----------------------------
 for label in os.listdir(DATA_DIR):
 
     folder_path = os.path.join(DATA_DIR, label)
 
-    # skip non-folders
     if not os.path.isdir(folder_path):
-        continue
-
-    # only allowed labels
-    if label not in allowed_labels:
         continue
 
     print(f"\nProcessing label: {label}")
 
-    images = os.listdir(folder_path)
-    print("Total images:", len(images))
+    for img_name in os.listdir(folder_path):
 
-    for img_name in images:
+        if not img_name.lower().endswith((".png", ".jpg", ".jpeg")):
+            continue
 
         img_path = os.path.join(folder_path, img_name)
 
-        # read image
         image = cv2.imread(img_path)
         if image is None:
-            print("Unreadable image:", img_path)
             skipped += 1
             continue
 
-        # resize
         image = cv2.resize(image, (512, 512))
-
-        # convert to RGB
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        # run MediaPipe
         result = hands.process(rgb)
 
         if not result.multi_hand_landmarks:
@@ -86,43 +73,61 @@ for label in os.listdir(DATA_DIR):
 
         detected += 1
 
-        # extract landmarks
+        # ----------------------------
+        # LANDMARKS
+        # ----------------------------
         lm = result.multi_hand_landmarks[0].landmark
-        base = lm[0]  # wrist
+        landmarks = np.array([[p.x, p.y, p.z] for p in lm])
 
-        features = []
-        for p in lm:
-            features.extend([
-                p.x - base.x,
-                p.y - base.y
-            ])  # removed z (noise reduction)
+        # ----------------------------
+        # NORMALIZATION
+        # ----------------------------
+        base = landmarks[0]
+        landmarks = landmarks - base
+
+        max_val = np.max(np.abs(landmarks))
+        if max_val > 0:
+            landmarks = landmarks / max_val
+
+        # ----------------------------
+        # XY FEATURES (42)
+        # ----------------------------
+        xy_features = landmarks[:, :2].flatten()
+
+        # ----------------------------
+        # ANGLE FEATURES (~12)
+        # ----------------------------
+        joints = [
+            (0, 5, 6), (5, 6, 7), (6, 7, 8),
+            (0, 9,10), (9,10,11), (10,11,12),
+            (0,13,14), (13,14,15), (14,15,16),
+            (0,17,18), (17,18,19), (18,19,20),
+        ]
+
+        angles = []
+        for a, b, c in joints:
+            angle = get_angle(landmarks[a], landmarks[b], landmarks[c])
+            angles.append(angle)
+
+        # ----------------------------
+        # FINAL FEATURES (54)
+        # ----------------------------
+        features = np.concatenate([xy_features, angles])
 
         X.append(features)
-        y.append(label)
+        y.append(label.upper())
 
 # ----------------------------
-# Final stats
+# SAVE DATA
 # ----------------------------
-print("\n====================")
-print("FINAL SAMPLES:", len(X))
-print("DETECTED:", detected)
-print("SKIPPED:", skipped)
-print("====================\n")
+X = np.array(X)
+y = np.array(y)
 
-# ----------------------------
-# Save dataset (FIXED PATH)
-# ----------------------------
-if len(X) > 0:
+print("\nFINAL DATASET SIZE:", X.shape)
+print("Detected:", detected)
+print("Skipped:", skipped)
 
-    SAVE_DIR = os.path.abspath(
-        os.path.join(BASE_DIR, "..", "data")
-    )
+np.save("data/X.npy", X)
+np.save("data/y.npy", y)
 
-    os.makedirs(SAVE_DIR, exist_ok=True)
-
-    np.save(os.path.join(SAVE_DIR, "X.npy"), np.array(X))
-    np.save(os.path.join(SAVE_DIR, "y.npy"), np.array(y))
-
-    print("Saved X.npy and y.npy successfully in /data folder")
-else:
-    print("ERROR: No valid samples collected.")
+print("Dataset saved successfully ✅")
